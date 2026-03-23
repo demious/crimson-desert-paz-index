@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PAZ Archive Search</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #1a1a2e;
+  --bg2: #16213e;
+  --bg3: #0f3460;
+  --surface: #1e2a4a;
+  --border: #2a3a5c;
+  --text: #e0e0e0;
+  --text2: #a0aec0;
+  --accent: #e94560;
+  --accent2: #ff6b6b;
+  --green: #48bb78;
+  --yellow: #ecc94b;
+  --blue: #4299e1;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.loading-overlay {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 1000;
+  transition: opacity 0.3s;
+}
+.loading-overlay.hidden { opacity: 0; pointer-events: none; }
+.loading-spinner {
+  width: 48px; height: 48px;
+  border: 4px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { margin-top: 16px; color: var(--text2); font-size: 14px; }
+.loading-progress { margin-top: 8px; color: var(--accent); font-size: 13px; }
+.loading-bar-wrap {
+  margin-top: 12px; width: 320px; max-width: 80vw; height: 6px;
+  background: var(--border); border-radius: 3px; overflow: hidden;
+}
+.loading-bar {
+  height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border-radius: 3px; transition: width 0.2s;
+}
+
+header {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 16px 24px;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+header h1 {
+  font-size: 20px; font-weight: 600;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.header-stats {
+  margin-left: auto;
+  font-size: 13px; color: var(--text2);
+}
+
+.controls {
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+}
+
+.search-box {
+  flex: 1 1 300px; min-width: 200px;
+  position: relative;
+}
+.search-box input {
+  width: 100%; padding: 8px 12px 8px 36px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: 14px;
+  outline: none; transition: border-color 0.2s;
+}
+.search-box input:focus { border-color: var(--accent); }
+.search-box input::placeholder { color: var(--text2); }
+.search-icon {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  color: var(--text2); font-size: 14px; pointer-events: none;
+}
+
+.filter-group {
+  display: flex; align-items: center; gap: 6px;
+}
+.filter-group label {
+  font-size: 12px; color: var(--text2); white-space: nowrap;
+}
+.filter-group select {
+  padding: 7px 28px 7px 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text); font-size: 13px;
+  outline: none; cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23a0aec0'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  max-width: 180px;
+}
+.filter-group select:focus { border-color: var(--accent); }
+
+.btn {
+  padding: 7px 14px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--surface);
+  color: var(--text); font-size: 13px; cursor: pointer;
+  transition: all 0.15s; white-space: nowrap;
+}
+.btn:hover { border-color: var(--accent); background: var(--bg3); }
+.btn-accent {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.btn-accent:hover { background: var(--accent2); border-color: var(--accent2); }
+
+.toolbar {
+  padding: 8px 24px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: var(--bg); border-bottom: 1px solid var(--border);
+  min-height: 40px;
+}
+.result-count {
+  font-size: 13px; color: var(--text2);
+}
+.result-count strong { color: var(--accent); font-weight: 600; }
+.search-time { font-size: 12px; color: var(--text2); margin-left: 4px; }
+.toolbar-right {
+  margin-left: auto;
+  display: flex; gap: 8px; align-items: center;
+}
+.select-all-wrap { font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 4px; }
+
+.table-wrap {
+  padding: 0 24px 24px;
+  overflow-x: auto;
+}
+table {
+  width: 100%; border-collapse: collapse;
+  font-size: 13px; table-layout: fixed;
+}
+thead { position: sticky; top: 0; z-index: 10; }
+th {
+  background: var(--bg2); padding: 10px 12px;
+  text-align: left; font-weight: 600; font-size: 12px;
+  color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px;
+  border-bottom: 2px solid var(--border);
+  cursor: pointer; user-select: none;
+  white-space: nowrap;
+}
+th:hover { color: var(--text); }
+th .sort-arrow { margin-left: 4px; font-size: 10px; }
+th.sorted { color: var(--accent); }
+td {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+tr:hover td { background: rgba(233,69,96,0.05); }
+.col-sel { width: 36px; text-align: center; }
+.col-archive { width: 70px; }
+.col-path { width: auto; }
+.col-ext { width: 80px; }
+.col-comp { width: 60px; }
+.col-enc { width: 50px; }
+.col-csize { width: 110px; text-align: right; }
+.col-dsize { width: 110px; text-align: right; }
+.col-paz { width: 55px; text-align: right; }
+.col-offset { width: 110px; font-family: 'Cascadia Code', 'Fira Code', monospace; }
+
+.tag {
+  display: inline-block; padding: 1px 6px;
+  border-radius: 3px; font-size: 11px; font-weight: 600;
+}
+.tag-lz4 { background: rgba(66,153,225,0.2); color: var(--blue); }
+.tag-none { color: var(--text2); }
+.tag-enc { background: rgba(236,201,75,0.2); color: var(--yellow); }
+
+.path-cell {
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+}
+mark {
+  background: rgba(233,69,96,0.3); color: var(--accent2);
+  border-radius: 2px; padding: 0 1px;
+}
+
+.pagination {
+  padding: 16px 24px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+.pagination button {
+  padding: 6px 12px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--surface);
+  color: var(--text); font-size: 13px; cursor: pointer;
+}
+.pagination button:hover:not(:disabled) { border-color: var(--accent); }
+.pagination button:disabled { opacity: 0.4; cursor: default; }
+.pagination button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.page-info { font-size: 13px; color: var(--text2); }
+
+footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  font-size: 11px; color: var(--text2);
+  text-align: center;
+  line-height: 1.6;
+}
+footer a { color: var(--accent); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+
+.export-menu {
+  position: relative; display: inline-block;
+}
+.export-dropdown {
+  display: none; position: absolute; right: 0; top: calc(100% + 4px);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; min-width: 160px; z-index: 20;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+}
+.export-dropdown.open { display: block; }
+.export-dropdown button {
+  display: block; width: 100%; padding: 8px 14px;
+  background: none; border: none; color: var(--text);
+  font-size: 13px; text-align: left; cursor: pointer;
+}
+.export-dropdown button:hover { background: var(--bg3); }
+.export-dropdown button:first-child { border-radius: 6px 6px 0 0; }
+.export-dropdown button:last-child { border-radius: 0 0 6px 6px; }
+
+@media (max-width: 768px) {
+  .controls { padding: 10px 12px; }
+  .table-wrap { padding: 0 8px 16px; }
+  header { padding: 12px; }
+  .toolbar { padding: 8px 12px; }
+  td, th { padding: 6px 8px; }
+}
+</style>
+</head>
+<body>
+
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">Downloading PAZ archive index from GitHub...</div>
+  <div class="loading-progress" id="loadingProgress"></div>
+  <div class="loading-bar-wrap"><div class="loading-bar" id="loadingBar"></div></div>
+</div>
+
+<header>
+  <h1>PAZ Archive Search</h1>
+  <span class="header-stats" id="headerStats"></span>
+</header>
+
+<div class="controls">
+  <div class="search-box">
+    <span class="search-icon">&#128269;</span>
+    <input type="text" id="searchInput" placeholder="Search file paths... (space-separated keywords, AND logic)" spellcheck="false">
+  </div>
+  <div class="filter-group">
+    <label>Archive:</label>
+    <select id="filterArchive"><option value="">All</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Extension:</label>
+    <select id="filterExt"><option value="">All</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Folder:</label>
+    <select id="filterFolder"><option value="">All</option></select>
+  </div>
+  <div class="filter-group">
+    <label>Compression:</label>
+    <select id="filterComp">
+      <option value="">All</option>
+      <option value="LZ4">LZ4</option>
+      <option value="none">None</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Encrypted:</label>
+    <select id="filterEnc">
+      <option value="">All</option>
+      <option value="yes">Yes</option>
+      <option value="no">No</option>
+    </select>
+  </div>
+  <button class="btn" id="btnClear">Clear Filters</button>
+</div>
+
+<div class="toolbar">
+  <span class="result-count" id="resultCount"></span>
+  <span class="search-time" id="searchTime"></span>
+  <div class="toolbar-right">
+    <label class="select-all-wrap">
+      <input type="checkbox" id="selectAll"> Select page
+    </label>
+    <div class="export-menu">
+      <button class="btn" id="btnExport">Export &#9662;</button>
+      <div class="export-dropdown" id="exportDropdown">
+        <button data-action="json-all">All results as JSON</button>
+        <button data-action="csv-all">All results as CSV</button>
+        <button data-action="json-sel">Selected as JSON</button>
+        <button data-action="csv-sel">Selected as CSV</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th class="col-sel"><input type="checkbox" id="thSelectAll" title="Select all on page"></th>
+        <th class="col-archive" data-col="archive">Archive <span class="sort-arrow"></span></th>
+        <th class="col-path" data-col="path">Path <span class="sort-arrow"></span></th>
+        <th class="col-ext" data-col="ext">Ext <span class="sort-arrow"></span></th>
+        <th class="col-comp" data-col="compression">Comp <span class="sort-arrow"></span></th>
+        <th class="col-enc" data-col="encryption">Enc <span class="sort-arrow"></span></th>
+        <th class="col-csize" data-col="compressed_size">Compressed <span class="sort-arrow"></span></th>
+        <th class="col-dsize" data-col="decompressed_size">Decompressed <span class="sort-arrow"></span></th>
+        <th class="col-paz" data-col="paz_file">PAZ <span class="sort-arrow"></span></th>
+        <th class="col-offset" data-col="offset">Offset <span class="sort-arrow"></span></th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+</div>
+
+<div class="pagination" id="pagination"></div>
+
+<footer>
+  Crimson Desert PAZ Archive Browser &mdash;
+  Built for use with <a href="https://github.com/Jesjsssi/CrimsonDesertUnpacker" target="_blank" rel="noopener">CrimsonDesertUnpacker</a> PAZ dump output.
+  <br>Index data loaded from <a href="https://github.com/demious/crimson-desert-paz-index" target="_blank" rel="noopener">crimson-desert-paz-index</a>.
+</footer>
+
+<script>
+// ── Web Worker (inline) ─────────────────────────────────────────────────────
+const workerCode = `
+let DATA = null;
+let EXTS = [];
+let FOLDERS = [];
+let ARCHIVES = [];
+let precomputedExt = null;
+let precomputedFolder = null;
+let pathLower = null;
+
+self.onmessage = function(e) {
+  const msg = e.data;
+  if (msg.type === 'load') {
+    handleLoad(msg.url);
+  } else if (msg.type === 'search') {
+    handleSearch(msg.filters, msg.sortCol, msg.sortDir);
+  }
+};
+
+async function handleLoad(url) {
+  try {
+    self.postMessage({ type: 'progress', text: 'Connecting to GitHub...', pct: 0 });
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('Failed to download index.json (HTTP ' + resp.status + ')');
+
+    const contentLength = resp.headers.get('Content-Length');
+    const total = contentLength ? parseInt(contentLength, 10) : 0;
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+
+    while (true) {
+      const { done, value } = reader.read ? await reader.read() : { done: true };
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      const mb = (received / 1048576).toFixed(1);
+      const pct = total ? (received / total) * 100 : 0;
+      if (total) {
+        const totalMb = (total / 1048576).toFixed(0);
+        self.postMessage({ type: 'progress', text: 'Downloading... ' + mb + ' / ' + totalMb + ' MB (' + pct.toFixed(1) + '%)', pct: pct });
+      } else {
+        self.postMessage({ type: 'progress', text: 'Downloading... ' + mb + ' MB', pct: 0 });
+      }
+    }
+
+    self.postMessage({ type: 'progress', text: 'Decoding response (' + (received / 1048576).toFixed(0) + ' MB)...', pct: 100 });
+    const combined = new Uint8Array(received);
+    let pos = 0;
+    for (const chunk of chunks) { combined.set(chunk, pos); pos += chunk.length; }
+    const text = new TextDecoder().decode(combined);
+
+    self.postMessage({ type: 'progress', text: 'Parsing JSON (' + (text.length / 1048576).toFixed(0) + ' MB)...', pct: 100 });
+    DATA = JSON.parse(text);
+
+    self.postMessage({ type: 'progress', text: 'Indexing ' + DATA.length.toLocaleString() + ' entries...', pct: 100 });
+
+    // Pre-compute extensions, folders, and lowercase paths
+    const extSet = new Set();
+    const folderSet = new Set();
+    const archiveSet = new Set();
+    precomputedExt = new Array(DATA.length);
+    precomputedFolder = new Array(DATA.length);
+    pathLower = new Array(DATA.length);
+
+    for (let i = 0; i < DATA.length; i++) {
+      const p = DATA[i].path;
+      const dot = p.lastIndexOf('.');
+      const ext = dot !== -1 ? p.substring(dot + 1).toLowerCase() : '';
+      precomputedExt[i] = ext;
+      extSet.add(ext);
+
+      const slash = p.indexOf('/');
+      const folder = slash !== -1 ? p.substring(0, slash) : '';
+      precomputedFolder[i] = folder;
+      folderSet.add(folder);
+
+      archiveSet.add(DATA[i].archive);
+      pathLower[i] = p.toLowerCase();
+    }
+
+    EXTS = Array.from(extSet).sort();
+    FOLDERS = Array.from(folderSet).sort();
+    ARCHIVES = Array.from(archiveSet).sort();
+
+    self.postMessage({
+      type: 'loaded',
+      count: DATA.length,
+      extensions: EXTS,
+      folders: FOLDERS,
+      archives: ARCHIVES
+    });
+  } catch (err) {
+    self.postMessage({ type: 'error', message: err.message });
+  }
+}
+
+function handleSearch(filters, sortCol, sortDir) {
+  const t0 = performance.now();
+  const keywords = (filters.keyword || '').toLowerCase().split(/\\s+/).filter(Boolean);
+  const archive = filters.archive || '';
+  const ext = filters.ext || '';
+  const folder = filters.folder || '';
+  const comp = filters.comp || '';
+  const enc = filters.enc || '';
+
+  const indices = [];
+
+  for (let i = 0; i < DATA.length; i++) {
+    const entry = DATA[i];
+
+    if (archive && entry.archive !== archive) continue;
+    if (ext && precomputedExt[i] !== ext) continue;
+    if (folder && precomputedFolder[i] !== folder) continue;
+    if (comp === 'LZ4' && entry.compression !== 'LZ4') continue;
+    if (comp === 'none' && entry.compression !== null) continue;
+    if (enc === 'yes' && entry.encryption !== 'ENC') continue;
+    if (enc === 'no' && entry.encryption !== null) continue;
+
+    if (keywords.length > 0) {
+      const pl = pathLower[i];
+      let match = true;
+      for (let k = 0; k < keywords.length; k++) {
+        if (pl.indexOf(keywords[k]) === -1) { match = false; break; }
+      }
+      if (!match) continue;
+    }
+
+    indices.push(i);
+  }
+
+  // Sort if requested
+  if (sortCol) {
+    const dir = sortDir === 'desc' ? -1 : 1;
+    if (sortCol === 'ext') {
+      indices.sort((a, b) => dir * precomputedExt[a].localeCompare(precomputedExt[b]));
+    } else if (sortCol === 'compressed_size' || sortCol === 'decompressed_size' || sortCol === 'paz_file') {
+      indices.sort((a, b) => dir * (DATA[a][sortCol] - DATA[b][sortCol]));
+    } else if (sortCol === 'offset') {
+      indices.sort((a, b) => {
+        const va = parseInt(DATA[a].offset, 16);
+        const vb = parseInt(DATA[b].offset, 16);
+        return dir * (va - vb);
+      });
+    } else {
+      indices.sort((a, b) => {
+        const va = DATA[a][sortCol] || '';
+        const vb = DATA[b][sortCol] || '';
+        return dir * String(va).localeCompare(String(vb));
+      });
+    }
+  }
+
+  const elapsed = performance.now() - t0;
+  self.postMessage({ type: 'results', indices: indices, elapsed: elapsed });
+}
+`;
+
+// ── State ───────────────────────────────────────────────────────────────────
+let worker;
+let allData = null;
+let resultIndices = [];
+let selectedSet = new Set();
+let currentPage = 0;
+const PAGE_SIZE = 200;
+let sortCol = null;
+let sortDir = 'asc';
+
+// ── DOM refs ────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const loadingOverlay = $('loadingOverlay');
+const loadingProgress = $('loadingProgress');
+const headerStats = $('headerStats');
+const searchInput = $('searchInput');
+const filterArchive = $('filterArchive');
+const filterExt = $('filterExt');
+const filterFolder = $('filterFolder');
+const filterComp = $('filterComp');
+const filterEnc = $('filterEnc');
+const btnClear = $('btnClear');
+const resultCount = $('resultCount');
+const searchTime = $('searchTime');
+const tableBody = $('tableBody');
+const pagination = $('pagination');
+const btnExport = $('btnExport');
+const exportDropdown = $('exportDropdown');
+const selectAllCheckbox = $('selectAll');
+const thSelectAll = $('thSelectAll');
+
+// ── Worker setup ────────────────────────────────────────────────────────────
+function initWorker() {
+  const blob = new Blob([workerCode], { type: 'application/javascript' });
+  worker = new Worker(URL.createObjectURL(blob));
+
+  worker.onmessage = function(e) {
+    const msg = e.data;
+    switch (msg.type) {
+      case 'progress':
+        loadingProgress.textContent = msg.text;
+        if (msg.pct !== undefined) $('loadingBar').style.width = msg.pct.toFixed(1) + '%';
+        break;
+      case 'loaded':
+        onDataLoaded(msg);
+        break;
+      case 'results':
+        onSearchResults(msg);
+        break;
+      case 'error':
+        loadingProgress.textContent = 'Error: ' + msg.message;
+        loadingProgress.style.color = '#e94560';
+        break;
+    }
+  };
+
+  // Load data from GitHub releases
+  worker.postMessage({ type: 'load', url: 'https://github.com/demious/crimson-desert-paz-index/releases/latest/download/index.json' });
+}
+
+function onDataLoaded(msg) {
+  headerStats.textContent = msg.count.toLocaleString() + ' entries across ' + msg.archives.length + ' archives';
+
+  // Populate filter dropdowns
+  populateSelect(filterArchive, msg.archives);
+  populateSelect(filterExt, msg.extensions);
+  populateSelect(filterFolder, msg.folders);
+
+  // We also need the raw data for export — request initial search to cache indices
+  // Store metadata for later
+  window._totalCount = msg.count;
+
+  // Fetch the data in main thread for export (we stream it separately)
+  // Actually, let's just keep indices and fetch page data from worker
+  // For export, we'll request data via worker too.
+  // Simpler: load data in main thread too (it's already cached by browser).
+  fetch('https://github.com/demious/crimson-desert-paz-index/releases/latest/download/index.json').then(r => r.json()).then(data => {
+    allData = data;
+  });
+
+  loadingOverlay.classList.add('hidden');
+  triggerSearch();
+  searchInput.focus();
+}
+
+function populateSelect(select, values) {
+  const frag = document.createDocumentFragment();
+  for (const v of values) {
+    if (!v) continue;
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v;
+    frag.appendChild(opt);
+  }
+  select.appendChild(frag);
+}
+
+// ── Search ──────────────────────────────────────────────────────────────────
+let searchTimeout = null;
+
+function triggerSearch() {
+  const filters = {
+    keyword: searchInput.value.trim(),
+    archive: filterArchive.value,
+    ext: filterExt.value,
+    folder: filterFolder.value,
+    comp: filterComp.value,
+    enc: filterEnc.value,
+  };
+  worker.postMessage({ type: 'search', filters, sortCol, sortDir });
+}
+
+function debouncedSearch() {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(triggerSearch, 150);
+}
+
+function onSearchResults(msg) {
+  resultIndices = msg.indices;
+  currentPage = 0;
+  selectedSet.clear();
+  selectAllCheckbox.checked = false;
+  thSelectAll.checked = false;
+
+  resultCount.innerHTML = '<strong>' + resultIndices.length.toLocaleString() + '</strong> results';
+  searchTime.textContent = '(' + msg.elapsed.toFixed(0) + ' ms)';
+
+  renderPage();
+  renderPagination();
+}
+
+// ── Table rendering ─────────────────────────────────────────────────────────
+function renderPage() {
+  if (!allData) {
+    // Data not yet loaded in main thread, retry shortly
+    setTimeout(renderPage, 100);
+    return;
+  }
+
+  const start = currentPage * PAGE_SIZE;
+  const end = Math.min(start + PAGE_SIZE, resultIndices.length);
+  const keywords = searchInput.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+  const rows = [];
+  for (let i = start; i < end; i++) {
+    const idx = resultIndices[i];
+    const e = allData[idx];
+    const ext = e.path.lastIndexOf('.') !== -1 ? e.path.substring(e.path.lastIndexOf('.') + 1) : '';
+    const compTag = e.compression === 'LZ4'
+      ? '<span class="tag tag-lz4">LZ4</span>'
+      : '<span class="tag tag-none">&mdash;</span>';
+    const encTag = e.encryption === 'ENC'
+      ? '<span class="tag tag-enc">ENC</span>'
+      : '<span class="tag tag-none">&mdash;</span>';
+
+    let pathHtml = escapeHtml(e.path);
+    if (keywords.length > 0) {
+      pathHtml = highlightKeywords(pathHtml, keywords);
+    }
+
+    const checked = selectedSet.has(idx) ? ' checked' : '';
+
+    rows.push(
+      '<tr>' +
+      '<td class="col-sel"><input type="checkbox" data-idx="' + idx + '"' + checked + '></td>' +
+      '<td class="col-archive">' + e.archive + '</td>' +
+      '<td class="col-path path-cell" title="' + escapeAttr(e.path) + '">' + pathHtml + '</td>' +
+      '<td class="col-ext">' + ext + '</td>' +
+      '<td class="col-comp">' + compTag + '</td>' +
+      '<td class="col-enc">' + encTag + '</td>' +
+      '<td class="col-csize">' + e.compressed_size.toLocaleString() + '</td>' +
+      '<td class="col-dsize">' + e.decompressed_size.toLocaleString() + '</td>' +
+      '<td class="col-paz">' + e.paz_file + '</td>' +
+      '<td class="col-offset">' + e.offset + '</td>' +
+      '</tr>'
+    );
+  }
+
+  tableBody.innerHTML = rows.join('');
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function escapeAttr(s) {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function highlightKeywords(html, keywords) {
+  for (const kw of keywords) {
+    const escaped = kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    html = html.replace(new RegExp('(' + escaped + ')', 'gi'), '<mark>$1</mark>');
+  }
+  return html;
+}
+
+// ── Pagination ──────────────────────────────────────────────────────────────
+function renderPagination() {
+  const totalPages = Math.max(1, Math.ceil(resultIndices.length / PAGE_SIZE));
+  if (totalPages <= 1) {
+    pagination.innerHTML = '';
+    return;
+  }
+
+  const btns = [];
+  btns.push('<button id="pgPrev"' + (currentPage === 0 ? ' disabled' : '') + '>&laquo; Prev</button>');
+
+  // Show smart page range
+  const pages = getPageRange(currentPage, totalPages, 7);
+  let lastP = -1;
+  for (const p of pages) {
+    if (lastP !== -1 && p - lastP > 1) {
+      btns.push('<span class="page-info">...</span>');
+    }
+    btns.push('<button class="pg-btn' + (p === currentPage ? ' active' : '') + '" data-page="' + p + '">' + (p + 1) + '</button>');
+    lastP = p;
+  }
+
+  btns.push('<button id="pgNext"' + (currentPage >= totalPages - 1 ? ' disabled' : '') + '>Next &raquo;</button>');
+  btns.push('<span class="page-info">Page ' + (currentPage + 1) + ' / ' + totalPages.toLocaleString() + '</span>');
+
+  pagination.innerHTML = btns.join('');
+}
+
+function getPageRange(current, total, maxButtons) {
+  if (total <= maxButtons) return Array.from({ length: total }, (_, i) => i);
+  const pages = new Set();
+  pages.add(0);
+  pages.add(total - 1);
+  const half = Math.floor(maxButtons / 2);
+  for (let i = Math.max(0, current - half); i <= Math.min(total - 1, current + half); i++) {
+    pages.add(i);
+  }
+  return Array.from(pages).sort((a, b) => a - b);
+}
+
+// ── Sorting ─────────────────────────────────────────────────────────────────
+function handleSort(col) {
+  if (sortCol === col) {
+    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortCol = col;
+    sortDir = 'asc';
+  }
+
+  // Update header UI
+  document.querySelectorAll('th[data-col]').forEach(th => {
+    th.classList.toggle('sorted', th.dataset.col === sortCol);
+    const arrow = th.querySelector('.sort-arrow');
+    if (th.dataset.col === sortCol) {
+      arrow.textContent = sortDir === 'asc' ? '\u25B2' : '\u25BC';
+    } else {
+      arrow.textContent = '';
+    }
+  });
+
+  triggerSearch();
+}
+
+// ── Export ───────────────────────────────────────────────────────────────────
+function exportData(format, useSelected) {
+  if (!allData) return;
+
+  let indices;
+  if (useSelected && selectedSet.size > 0) {
+    indices = Array.from(selectedSet);
+  } else {
+    indices = resultIndices;
+  }
+
+  if (indices.length === 0) {
+    alert('No data to export.');
+    return;
+  }
+
+  let content, filename, mimeType;
+
+  if (format === 'json') {
+    const data = indices.map(i => allData[i]);
+    content = JSON.stringify(data, null, 2);
+    filename = 'paz_export.json';
+    mimeType = 'application/json';
+  } else {
+    const headers = ['archive', 'path', 'extension', 'compression', 'encryption', 'compressed_size', 'decompressed_size', 'paz_file', 'offset'];
+    const lines = [headers.join(',')];
+    for (const i of indices) {
+      const e = allData[i];
+      const ext = e.path.lastIndexOf('.') !== -1 ? e.path.substring(e.path.lastIndexOf('.') + 1) : '';
+      lines.push([
+        e.archive,
+        '"' + e.path.replace(/"/g, '""') + '"',
+        ext,
+        e.compression || '',
+        e.encryption || '',
+        e.compressed_size,
+        e.decompressed_size,
+        e.paz_file,
+        e.offset
+      ].join(','));
+    }
+    content = lines.join('\n');
+    filename = 'paz_export.csv';
+    mimeType = 'text/csv';
+  }
+
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  exportDropdown.classList.remove('open');
+}
+
+// ── Event listeners ─────────────────────────────────────────────────────────
+searchInput.addEventListener('input', debouncedSearch);
+filterArchive.addEventListener('change', triggerSearch);
+filterExt.addEventListener('change', triggerSearch);
+filterFolder.addEventListener('change', triggerSearch);
+filterComp.addEventListener('change', triggerSearch);
+filterEnc.addEventListener('change', triggerSearch);
+
+btnClear.addEventListener('click', () => {
+  searchInput.value = '';
+  filterArchive.value = '';
+  filterExt.value = '';
+  filterFolder.value = '';
+  filterComp.value = '';
+  filterEnc.value = '';
+  sortCol = null;
+  sortDir = 'asc';
+  document.querySelectorAll('th[data-col]').forEach(th => {
+    th.classList.remove('sorted');
+    th.querySelector('.sort-arrow').textContent = '';
+  });
+  triggerSearch();
+});
+
+document.querySelectorAll('th[data-col]').forEach(th => {
+  th.addEventListener('click', () => handleSort(th.dataset.col));
+});
+
+pagination.addEventListener('click', e => {
+  const btn = e.target.closest('button');
+  if (!btn || btn.disabled) return;
+  if (btn.id === 'pgPrev') { currentPage--; }
+  else if (btn.id === 'pgNext') { currentPage++; }
+  else if (btn.dataset.page !== undefined) { currentPage = parseInt(btn.dataset.page); }
+  renderPage();
+  renderPagination();
+  document.querySelector('.table-wrap').scrollTo(0, 0);
+});
+
+// Selection
+tableBody.addEventListener('change', e => {
+  if (e.target.type === 'checkbox') {
+    const idx = parseInt(e.target.dataset.idx);
+    if (e.target.checked) selectedSet.add(idx);
+    else selectedSet.delete(idx);
+  }
+});
+
+function togglePageSelection(checked) {
+  const start = currentPage * PAGE_SIZE;
+  const end = Math.min(start + PAGE_SIZE, resultIndices.length);
+  for (let i = start; i < end; i++) {
+    if (checked) selectedSet.add(resultIndices[i]);
+    else selectedSet.delete(resultIndices[i]);
+  }
+  renderPage();
+}
+
+selectAllCheckbox.addEventListener('change', e => {
+  thSelectAll.checked = e.target.checked;
+  togglePageSelection(e.target.checked);
+});
+thSelectAll.addEventListener('change', e => {
+  selectAllCheckbox.checked = e.target.checked;
+  togglePageSelection(e.target.checked);
+});
+
+// Export dropdown
+btnExport.addEventListener('click', e => {
+  e.stopPropagation();
+  exportDropdown.classList.toggle('open');
+});
+document.addEventListener('click', () => exportDropdown.classList.remove('open'));
+exportDropdown.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const [fmt, scope] = btn.dataset.action.split('-');
+  exportData(fmt, scope === 'sel');
+});
+
+// Keyboard shortcuts
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    triggerSearch();
+  }
+});
+
+// ── Init ────────────────────────────────────────────────────────────────────
+initWorker();
+</script>
+</body>
+</html>
